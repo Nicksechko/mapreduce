@@ -249,6 +249,8 @@ std::shared_ptr<Executor> MakeThreadPoolExecutor(int num_threads);
 template <class T>
 class Future : public Task {
 public:
+    Future() = default;
+
     explicit Future(std::function<T()> function) : function_(function) {
     }
 
@@ -270,7 +272,7 @@ public:
         }
     }
 
-private:
+protected:
     mutable std::condition_variable_any result_cv_;
     std::function<T()> function_;
     std::optional<T> result_ = std::nullopt;
