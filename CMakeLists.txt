@@ -9,6 +9,6 @@ include_directories(${Boost_INCLUDE_DIRS})
 
 add_executable(MapReduce main.cpp mapreduce.cpp mapreduce.h executor.cpp executor.h)
 add_executable(MapScript map_script.cpp)
-#add_executable(reduce cmake-build-debug/reduce.cpp)
+#add_executable(Reduce reduce_script.cpp)
 
 target_link_libraries(MapReduce ${Boost_LIBRARIES})
