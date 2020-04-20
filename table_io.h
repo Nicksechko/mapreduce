@@ -44,6 +44,8 @@ public:
 
     void Write(const std::vector<TableItem>& items);
 
+    bool WriteKeyBlock(TableReader& reader);
+
     void Append(TableReader& reader, size_t max_count = -1);
 
     void Append(const std::string& source_path, size_t max_conut = -1);

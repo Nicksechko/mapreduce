@@ -2,6 +2,7 @@
 
 TableReader::TableReader(const std::string& table_path)
     : table_stream_(table_path) {
+    Next();
 }
 
 bool TableReader::Next() {
@@ -40,10 +41,13 @@ std::pair<std::string, std::string> TableReader::GetItem() const {
 }
 
 std::vector<std::pair<std::string, std::string>> TableReader::ReadAllItems() {
-    std::vector<std::pair<std::string, std::string>> result;
-    while (Next()) {
-        result.push_back(GetItem());
+    if (Empty()) {
+        return {};
     }
+    std::vector<std::pair<std::string, std::string>> result;
+    do {
+        result.push_back(GetItem());
+    } while (Next());
 
     return result;
 }
@@ -70,11 +74,27 @@ void TableWriter::Write(const std::vector<TableItem>& items) {
     }
 }
 
-void TableWriter::Append(TableReader& reader, size_t max_count) {
-    size_t count = 0;
-    while (count++ < max_count && reader.Next()) {
+bool TableWriter::WriteKeyBlock(TableReader& reader) {
+    if (reader.Empty()) {
+        return false;
+    }
+    Write(reader.GetRow());
+    std::string key = reader.GetKey();
+    while (reader.Next() && reader.GetKey() == key) {
         Write(reader.GetRow());
     }
+
+    return true;
+}
+
+void TableWriter::Append(TableReader& reader, size_t max_count) {
+    if (reader.Empty()) {
+        return;
+    }
+    size_t count = 0;
+    do {
+        Write(reader.GetRow());
+    } while (reader.Next() && ++count < max_count);
 }
 
 void TableWriter::Append(const std::string& source_path, size_t max_count) {

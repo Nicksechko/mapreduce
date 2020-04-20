@@ -3,19 +3,22 @@
 
 int main(int argc, char** argv) {
     std::string mode(argv[1]);
-    std::string script_path(argv[2]);
-    std::string source_path(argv[3]);
-    std::string result_path(argv[4]);
+    std::string source_path(argv[2]);
+    std::string result_path(argv[3]);
 
-    auto executor = MakeThreadPoolExecutor(2);
-
-    TableTaskPtr result;
+    auto executor = MakeThreadPoolExecutor(4);
 
     if (mode == "map") {
-        std::string tmp_result = "tmp_result";
-        auto map_result = Map(executor, source_path, tmp_result, script_path);
-        result = Sort(executor, map_result->get(), result_path, 1, true);
-        std::cout << result->get() << std::endl;
+        std::string script_path(argv[4]);
+        auto map_result = Map(executor, source_path, result_path, script_path);
+        std::cout << map_result->get() << std::endl;
+    } else if (mode == "sort") {
+        auto sort_result = Sort(executor, source_path, result_path);
+        std::cout << sort_result->get() << std::endl;
+    } else if (mode == "reduce") {
+        std::string script_path(argv[4]);
+        auto reduce_result = Reduce(executor, source_path, result_path, script_path);
+        std::cout << reduce_result->get() << std::endl;
     }
 
     return 0;

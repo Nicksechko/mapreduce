@@ -60,13 +60,13 @@ TableTaskPtr Join(std::shared_ptr<Executor> executor,
                   std::string result_path,
                   bool remove_source = false);
 
-class NaiveMapper : public TableTask {
+class Performer : public TableTask {
 public:
-    NaiveMapper(ExecutorPtr executor,
-                std::string source_path,
-                std::string result_path,
-                std::string script_path,
-                bool remove_source = false);
+    Performer(ExecutorPtr executor,
+              std::string source_path,
+              std::string result_path,
+              std::string script_path,
+              bool remove_source = false);
 
     void Submit() override;
 
@@ -82,7 +82,7 @@ TableTaskPtr NaiveMap(ExecutorPtr executor,
 
 class Mapper : public TableTask {
 public:
-    Mapper(std::shared_ptr<Executor> executor,
+    Mapper(ExecutorPtr executor,
            std::string source_path,
            std::string result_path,
            std::string script_path,
@@ -164,19 +164,22 @@ TableTaskPtr Sort(ExecutorPtr executor,
                   size_t block_size = 1,
                   bool remove_source = false);
 
-//class Reducer : public TableTask {
-//public:
-//    Reducer(std::shared_ptr<Executor> executor, const std::string& script_path,
-//           const std::string& source_path, const std::string& result_path);
-//
-//    void Run();
-//
-//protected:
-//    std::shared_ptr<Executor> executor_;
-//    size_t processes_count_ = 0;
-//    const std::string id_;
-//    const std::string& script_path_;
-//    const std::string source_path_;
-//    const std::string result_path_;
-//    const size_t block_size_;
-//};
+class Reducer : public TableTask {
+public:
+    Reducer(ExecutorPtr executor,
+            std::string source_path,
+            std::string result_path,
+            std::string script_path,
+            bool remove_source = false);
+
+    void Submit() override;
+
+protected:
+    const std::string script_path_;
+};
+
+TableTaskPtr Reduce(ExecutorPtr executor,
+                     std::string source_path,
+                     std::string result_path,
+                     std::string script_path,
+                     bool remove_source = false);

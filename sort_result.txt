@@ -1,0 +1,17 @@
+bus	1
+bus	1
+bus	1
+bus	1
+bus	1
+bus	1
+bus	1
+car	1
+car	1
+car	1
+car	1
+car	1
+car	1
+train	1
+train	1
+train	1
+train	1
