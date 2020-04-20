@@ -130,6 +130,8 @@ class Future;
 template <class T>
 using FuturePtr = std::shared_ptr<Future<T>>;
 
+using ExecutorPtr = std::shared_ptr<Executor>;
+
 struct Unit {};
 
 class Executor : public std::enable_shared_from_this<Executor> {
@@ -159,8 +161,8 @@ public:
         return future;
     }
 
-    template <class T>
-    FuturePtr<std::vector<T>> whenAll(std::vector<FuturePtr<T>> all) {
+    template <class F, class T>
+    FuturePtr<std::vector<T>> whenAll(std::vector<F> all) {
         auto future = std::make_shared<Future<std::vector<T>>>([all] {
           std::vector<T> result;
           for (auto item : all) {

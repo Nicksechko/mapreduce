@@ -1,7 +1,4 @@
-#include <iostream>
 #include <string>
-#include <thread>
-#include <shared_mutex>
 #include "mapreduce.h"
 
 int main(int argc, char** argv) {
@@ -10,17 +7,15 @@ int main(int argc, char** argv) {
     std::string source_path(argv[3]);
     std::string result_path(argv[4]);
 
-    auto executor = MakeThreadPoolExecutor(1);
+    auto executor = MakeThreadPoolExecutor(2);
 
-    FuturePtr<std::string> result;
+    TableTaskPtr result;
 
     if (mode == "map") {
         std::string tmp_result = "tmp_result";
-        auto map_result = Map(executor, script_path, source_path, tmp_result);
-        executor->submit(map_result);
-        result = Sort(executor, map_result->get(), result_path);
-        executor->submit(result);
-        result->get();
+        auto map_result = Map(executor, source_path, tmp_result, script_path);
+        result = Sort(executor, map_result->get(), result_path, 1, true);
+        std::cout << result->get() << std::endl;
     }
 
     return 0;
