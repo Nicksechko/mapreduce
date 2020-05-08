@@ -161,8 +161,24 @@ public:
         return future;
     }
 
-    template <class F, class T>
-    FuturePtr<std::vector<T>> whenAll(std::vector<F> all) {
+    template <class T>
+    FuturePtr<T> redirect(FuturePtr<FuturePtr<T>> double_future) {
+        auto future = std::make_shared<Future<T>>();
+        then<Unit>(double_future, [=] {
+            auto task = double_future->get();
+            future->addDependency(task);
+            future->setFunc([task] {
+                return task->get();
+            });
+            submit(future);
+            return Unit{};
+        });
+
+        return future;
+    }
+
+    template <class T>
+    FuturePtr<std::vector<T>> whenAll(std::vector<FuturePtr<T>> all) {
         auto future = std::make_shared<Future<std::vector<T>>>([all] {
           std::vector<T> result;
           for (auto item : all) {
@@ -256,6 +272,14 @@ public:
     explicit Future(std::function<T()> function) : function_(function) {
     }
 
+    void setFunc(const std::function<T()>& func) {
+        std::unique_lock<std::shared_mutex> lock(Task::mutex_);
+        if (isTaskStarted()) {
+            throw std::runtime_error("Attempt to change started task function");
+        }
+        function_ = func;
+    }
+
     void run() override {
         T result = function_();
         std::unique_lock<std::shared_mutex> lock(Task::mutex_);
@@ -272,6 +296,16 @@ public:
         } else {
             throw std::runtime_error("Task was canceled");
         }
+    }
+
+    void setResult(const T& result) {
+        std::unique_lock<std::shared_mutex> lock(Task::mutex_);
+        if (isTaskStarted()) {
+            throw std::runtime_error("Attempt to change started task function");
+        }
+        result_ = result;
+        status_ = TaskStatus::Completed;
+        finish(lock);
     }
 
 protected:

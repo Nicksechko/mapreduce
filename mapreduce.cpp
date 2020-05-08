@@ -1,317 +1,218 @@
 #include "mapreduce.h"
 
-size_t TableTask::tasks_count = 0;
-
-TableTask::TableTask(std::string name) : name_(std::move(name)), id_(std::to_string(tasks_count++)) {
+Concatenater::Concatenater(std::shared_ptr<Executor> executor,
+                           std::vector<std::string> source_path,
+                           bool remove_source)
+    : ITableTask("concatenate", std::move(executor), std::move(source_path), remove_source) {
 }
 
-TableTask::TableTask(std::string name,
-                     ExecutorPtr executor,
-                     std::string source_path,
-                     std::string result_path,
-                     bool remove_source)
-    : name_(std::move(name)),
-      executor_(std::move(executor)),
-      source_path_(std::move(source_path)),
-      result_path_(std::move(result_path)),
-      id_(std::to_string(tasks_count++)),
-      remove_source_(remove_source) {
-}
-
-std::string TableTask::GetNewProcessName() {
-    return name_ + "_" + id_ + "_" + std::to_string(processes_count_++);
-}
-
-TableTask::~TableTask() {
-    if (!source_path_.empty() && remove_source_) {
-        bp::system("rm " + source_path_);
+void Concatenater::run() {
+    result_path_ = GetNewFileName();
+    TableWriter result(result_path_);
+    for (const auto& source_path : source_path_) {
+        result.Append(source_path);
     }
-}
-
-template<class Operation, class ...Args>
-TableTaskPtr Run(ExecutorPtr executor, Args ...args) {
-    TableTaskPtr task = std::make_shared<Operation>(executor, args...);
-    task->Submit();
-    executor->submit(task);
-    return task;
-}
-
-Joiner::Joiner(std::shared_ptr<Executor> executor,
-               std::vector<TableTaskPtr> source_path_tasks,
-               std::string result_path,
-               bool remove_source)
-    : TableTask("join", std::move(executor), "", std::move(result_path), remove_source),
-      source_path_tasks_(std::move(source_path_tasks)) {
-}
-
-void Joiner::Submit() {
-    auto all_future = executor_->whenAll<TableTaskPtr, std::string>(source_path_tasks_);
-    addDependency(all_future);
-    function_ = [this, all_future] {
-        TableWriter result(result_path_);
-        std::vector<std::string> source_paths = all_future->get();
-        for (const auto& source_path : source_paths) {
-            result.Append(source_path);
-        }
-
-        return result_path_;
-    };
-}
-
-Joiner::~Joiner() {
-    if (remove_source_) {
-        for (const auto& task : source_path_tasks_) {
-            std::string source_path = task->get();
-            bp::system("rm " + source_path);
-        }
-    }
-}
-
-TableTaskPtr Join(std::shared_ptr<Executor> executor,
-                  std::vector<TableTaskPtr> source_path_tasks,
-                  std::string result_path,
-                  bool remove_source) {
-    return Run<Joiner>(std::move(executor), std::move(source_path_tasks), std::move(result_path), remove_source);
 }
 
 Performer::Performer(std::shared_ptr<Executor> executor,
                      std::string source_path,
-                     std::string result_path,
-                     std::string script_path,
+                     std::string script_command,
                      bool remove_source)
-    : TableTask("perform", std::move(executor), std::move(source_path), std::move(result_path), remove_source),
-      script_path_(std::move(script_path)) {
+    : ITableTask("perform", std::move(executor), std::move(source_path), remove_source),
+      script_command_(std::move(script_command)) {
 }
 
-void Performer::Submit() {
-    function_ = [this] {
-        bp::system("./" + script_path_, bp::std_out > result_path_, bp::std_in < source_path_);
-        return result_path_;
-    };
+void Performer::run() {
+    result_path_ = GetNewFileName();
+    bp::system(script_command_, bp::std_out > result_path_, bp::std_in < source_path_);
 }
 
-TableTaskPtr Perform(ExecutorPtr executor,
-                     std::string source_path,
-                     std::string result_path,
-                     std::string script_path,
-                     bool remove_source) {
-    return Run<Performer>(std::move(executor), std::move(source_path), std::move(result_path),
-                          std::move(script_path), remove_source);
+Splitter::Splitter(ExecutorPtr executor,
+                   std::string source_path,
+                   bool remove_source,
+                   size_t block_size,
+                   bool by_key)
+    : ITableTask("split", std::move(executor), std::move(source_path), remove_source),
+      block_size_(block_size), by_key_(by_key) {
 }
 
-Mapper::Mapper(std::shared_ptr<Executor> executor,
-               std::string source_path,
-               std::string result_path,
-               std::string script_path,
-               size_t block_size,
-               bool remove_source)
-    : TableTask("map", std::move(executor), std::move(source_path), std::move(result_path), remove_source),
-      script_path_(std::move(script_path)),
-      block_size_(block_size) {
-}
-
-void Mapper::Submit() {
+void Splitter::run() {
     TableReader source(source_path_);
-    std::vector<TableTaskPtr> processes;
     while (!source.Empty()) {
-        std::string process_name = GetNewProcessName();
-        std::string process_data_filename = process_name + "_data";
-        std::string process_result_filename = process_name + "_result";
-        TableWriter process_data(process_data_filename);
+        std::string chunk_name = GetNewFileName();
+        TableWriter chunk(chunk_name);
 
-        process_data.Append(source, block_size_);
+        if (by_key_) {
+            chunk.WriteKeyBlock(source);
+        } else {
+            chunk.Append(source, block_size_);
+        }
 
-        processes.push_back(Perform(executor_, process_data_filename, process_result_filename,
-                                    script_path_, true));
+        result_path_.push_back(chunk_name);
     }
-
-    auto joiner = Join(executor_, processes, result_path_, true);
-
-    addDependency(joiner);
-
-    function_ = [joiner] {
-        return joiner->get();
-    };
-}
-
-TableTaskPtr Map(ExecutorPtr executor,
-                 std::string source_path,
-                 std::string result_path,
-                 std::string script_path,
-                 size_t block_size,
-                 bool remove_source) {
-    return Run<Mapper>(std::move(executor), std::move(source_path), std::move(result_path),
-                       std::move(script_path), block_size, remove_source);
 }
 
 NaiveSorter::NaiveSorter(ExecutorPtr executor,
                          std::string source_path,
-                         std::string result_path,
                          bool remove_source)
-    : TableTask("naive_sort", std::move(executor), std::move(source_path), std::move(result_path), remove_source) {
+    : ITableTask("naive_sort", std::move(executor), std::move(source_path), remove_source) {
 }
 
-void NaiveSorter::Submit() {
-    function_ = [=] {
-        auto items = TableReader(source_path_).ReadAllItems();
+void NaiveSorter::run() {
+    auto items = TableReader(source_path_).ReadAllItems();
 
-        std::sort(items.begin(), items.end());
+    std::sort(items.begin(), items.end());
 
-        TableWriter result(result_path_);
-        result.Write(items);
-
-        return result_path_;
-    };
-}
-
-TableTaskPtr NaiveSort(ExecutorPtr executor,
-                       std::string source_path,
-                       std::string result_path,
-                       bool remove_source) {
-    return Run<NaiveSorter>(std::move(executor), std::move(source_path), std::move(result_path), remove_source);
+    result_path_ = GetNewFileName();
+    TableWriter result(result_path_);
+    result.Write(items);
 }
 
 Merger::Merger(ExecutorPtr executor,
-               TableTaskPtr first_source_task,
-               TableTaskPtr second_source_task,
-               std::string result_path,
+               std::vector<std::string> source_path,
                bool remove_sources)
-    : TableTask("merge", std::move(executor), "", std::move(result_path), remove_sources),
-      first_source_task_(std::move(first_source_task)),
-      second_source_task_(std::move(second_source_task)) {
+    : ITableTask("merge", std::move(executor), std::move(source_path), remove_sources) {
+    if(source_path_.size() != 2) {
+        throw std::runtime_error("Merge accept exactly 2 tables");
+    }
 }
 
-void Merger::Submit() {
-    addDependency(first_source_task_);
-    addDependency(second_source_task_);
-
-    function_ = [=] {
-        TableReader first_source(first_source_task_->get());
-        TableReader second_source(second_source_task_->get());
-        TableWriter result(result_path_);
-        while (!first_source.Empty() || !second_source.Empty()) {
-            if (second_source.Empty() || (!first_source.Empty() && first_source.GetKey() < second_source.GetKey())) {
-                result.Write(first_source.GetItem());
-                first_source.Next();
-            } else {
-                result.Write(second_source.GetItem());
-                second_source.Next();
-            }
+void Merger::run() {
+    result_path_ = GetNewFileName();
+    TableReader first_source(source_path_[0]);
+    TableReader second_source(source_path_[1]);
+    TableWriter result(result_path_);
+    while (!first_source.Empty() || !second_source.Empty()) {
+        if (second_source.Empty() || (!first_source.Empty() && first_source.GetKey() < second_source.GetKey())) {
+            result.Write(first_source.GetItem());
+            first_source.Next();
+        } else {
+            result.Write(second_source.GetItem());
+            second_source.Next();
         }
-
-        return result_path_;
-    };
-}
-
-Merger::~Merger() {
-    if (remove_source_) {
-        bp::system("rm " + first_source_task_->get());
-        bp::system("rm " + second_source_task_->get());
     }
 }
 
-TableTaskPtr Merge(ExecutorPtr executor,
-                   TableTaskPtr first_source_path,
-                   TableTaskPtr second_source_path,
-                   std::string result_path,
-                   bool remove_source) {
-    return Run<Merger>(std::move(executor), std::move(first_source_path), std::move(second_source_path),
-                       std::move(result_path), remove_source);
+ListMerger::ListMerger(ExecutorPtr executor,
+                       std::vector<std::string> source_paths,
+                       bool remove_source)
+    : ITableTask("list_merge", std::move(executor), std::move(source_paths), remove_source) {
 }
 
-Sorter::Sorter(ExecutorPtr executor,
-               std::string source_path,
-               std::string result_path,
-               size_t block_size,
-               bool remove_source)
-    : TableTask("sort", std::move(executor), std::move(source_path), std::move(result_path), remove_source),
-      block_size_(block_size) {
-}
-
-void Sorter::Submit() {
-    TableReader source(source_path_);
-    std::vector<TableTaskPtr> processes;
-    while (!source.Empty()) {
-        std::string process_filename = GetNewProcessName();
-        std::string process_data_filename = process_filename + "_data";
-        std::string process_result_filename = process_filename + "_result";
-        TableWriter process_data(process_data_filename);
-        process_data.Append(source, block_size_);
-
-        processes.push_back(Run<NaiveSorter>(executor_, process_data_filename, process_result_filename, true));
+void ListMerger::run() {
+    for (const auto& source_path : source_path_) {
+        source_links_.push_back(GetNewFileName());
+        bp::system("ln " + source_path + " " + source_links_.back());
     }
-
-    auto merged_future = RecursiveMergeSort(0, processes.size(), processes);
-
-    addDependency(merged_future);
-
-    function_ = [merged_future] {
-        return merged_future->get();
-    };
+    result_path_ = RecursiveMerge(0, source_links_.size());
 }
 
-TableTaskPtr Sorter::RecursiveMergeSort(size_t begin, size_t end, const std::vector<TableTaskPtr>& tasks) {
+TableFuturePtr ListMerger::RecursiveMerge(size_t begin, size_t end) {
     if (begin + 1 == end) {
-        return tasks[begin];
+        return DummyFuture(source_links_[begin]);
     }
+
     size_t mid = begin + (end - begin) / 2;
-    auto left = RecursiveMergeSort(begin, mid, tasks);
-    auto right = RecursiveMergeSort(mid, end, tasks);
-    std::string result_path = GetNewProcessName();
-    if (end - begin == tasks.size()) {
-        result_path = result_path_;
-    }
-    auto merged = Run<Merger>(executor_, left, right, result_path, true);
+    auto left = RecursiveMerge(begin, mid);
+    auto right = RecursiveMerge(mid, end);
 
-    return merged;
+    return Merge(executor_, left, right, true);
 }
 
-TableTaskPtr Sort(ExecutorPtr executor,
-                  std::string source_path,
-                  std::string result_path,
-                  size_t block_size,
-                  bool remove_source) {
-    return Run<Sorter>(std::move(executor), std::move(source_path), std::move(result_path), block_size, remove_source);
+TableFuturePtr Concatenate(ExecutorPtr executor,
+                           MultiTableFuturePtr source_paths,
+                           bool remove_source) {
+    return Run<Concatenater, std::string>(std::move(executor), std::move(source_paths), remove_source);
 }
 
-Reducer::Reducer(ExecutorPtr executor,
-                 std::string source_path,
-                 std::string result_path,
-                 std::string script_path,
-                 bool remove_source)
-    : TableTask("reduce", std::move(executor), std::move(source_path), std::move(result_path), remove_source),
-      script_path_(std::move(script_path)) {
+TableFuturePtr Perform(ExecutorPtr executor,
+                       TableFuturePtr source_path,
+                       std::string script_command,
+                       bool remove_source) {
+    return Run<Performer, std::string>(std::move(executor), std::move(source_path), std::move(script_command),
+                                       remove_source);
 }
 
-void Reducer::Submit() {
-    TableReader source(source_path_);
-    std::vector<TableTaskPtr> processes;
-    while (!source.Empty()) {
-        std::string process_name = GetNewProcessName();
-        std::string process_data_filename = process_name + "_data";
-        std::string process_result_filename = process_name + "_result";
-
-        TableWriter process_data(process_data_filename);
-        process_data.WriteKeyBlock(source);
-
-        processes.push_back(Perform(executor_, process_data_filename, process_result_filename,
-                                    script_path_, true));
-    }
-
-    auto joiner = Join(executor_, processes, result_path_, true);
-
-    addDependency(joiner);
-
-    function_ = [joiner] {
-        return joiner->get();
-    };
+MultiTableFuturePtr Perform(ExecutorPtr executor,
+                            MultiTableFuturePtr source_paths,
+                            std::string script_command,
+                            bool remove_source) {
+    return RunForAll<Performer, std::string>(std::move(executor), std::move(source_paths), std::move(script_command),
+                                             remove_source);
 }
 
-TableTaskPtr Reduce(ExecutorPtr executor,
-                    std::string source_path,
-                    std::string result_path,
-                    std::string script_path,
-                    bool remove_source) {
-    return Run<Reducer>(std::move(executor), std::move(source_path), std::move(result_path),
-                        std::move(script_path), remove_source);
+MultiTableFuturePtr Split(ExecutorPtr executor,
+                          TableFuturePtr source_path,
+                          bool remove_source,
+                          size_t block_size,
+                          bool by_key) {
+    return Run<Splitter, std::vector<std::string>>(std::move(executor), std::move(source_path), remove_source,
+                                                   block_size, by_key);
+}
+
+TableFuturePtr Map(ExecutorPtr executor,
+                   TableFuturePtr source_path,
+                   std::string script_command,
+                   bool remove_source,
+                   size_t block_size) {
+    auto split_result = Split(executor, std::move(source_path), remove_source, block_size);
+    auto perform_result = Perform(executor, split_result, std::move(script_command), true);
+    return Concatenate(executor, perform_result, true);
+}
+
+TableFuturePtr NaiveSort(ExecutorPtr executor,
+                         TableFuturePtr source_path,
+                         bool remove_source) {
+    return Run<NaiveSorter, std::string>(std::move(executor), std::move(source_path), remove_source);
+}
+
+MultiTableFuturePtr NaiveSort(ExecutorPtr executor,
+                              MultiTableFuturePtr source_paths,
+                              bool remove_source) {
+    return RunForAll<NaiveSorter, std::string>(std::move(executor), std::move(source_paths), remove_source);
+}
+
+TableFuturePtr Merge(ExecutorPtr executor,
+                     TableFuturePtr first_source_path,
+                     TableFuturePtr second_source_path,
+                     bool remove_source) {
+    auto source_paths = executor->whenAll<std::string>({std::move(first_source_path), std::move(second_source_path)});
+    return Run<Merger, std::string>(std::move(executor), source_paths, remove_source);
+}
+
+TableFuturePtr Merge(ExecutorPtr executor,
+                     MultiTableFuturePtr source_paths,
+                     bool remove_source) {
+    auto double_future = Run<ListMerger, TableFuturePtr>(executor, std::move(source_paths), remove_source);
+    return executor->redirect(double_future);
+}
+
+TableFuturePtr Sort(ExecutorPtr executor,
+                    TableFuturePtr source_path,
+                    bool remove_source,
+                    size_t block_size) {
+    auto split_result = Split(executor, std::move(source_path), remove_source, block_size);
+    auto naive_sort_result = NaiveSort(executor, std::move(split_result), true);
+    return Merge(executor, naive_sort_result, true);
+}
+
+TableFuturePtr Reduce(ExecutorPtr executor,
+                      TableFuturePtr source_path,
+                      std::string script_command,
+                      bool remove_source,
+                      size_t block_size) {
+    auto split_result = Split(executor, std::move(source_path), remove_source, block_size, true);
+    auto perform_result = Perform(executor, std::move(split_result), std::move(script_command), true);
+    return Concatenate(executor, std::move(perform_result), true);
+}
+
+TableFuturePtr MapReduce(ExecutorPtr executor,
+                         TableFuturePtr source_path,
+                         std::string map_script_command,
+                         std::string reduce_script_command,
+                         bool remove_source,
+                         size_t block_size) {
+    auto map_result = Map(executor, std::move(source_path), std::move(map_script_command), remove_source, block_size);
+    auto sort_result = Sort(executor, std::move(map_result), true, block_size);
+    return Reduce(executor, std::move(sort_result), std::move(reduce_script_command), true, block_size);
 }
