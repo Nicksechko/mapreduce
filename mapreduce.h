@@ -12,7 +12,7 @@ namespace bp = boost::process;
 namespace {
 std::atomic<size_t> tasks_count{0};
 
-const size_t default_block_size = 1;
+const size_t default_block_size = 10000;
 }
 
 template<class TIn, class TOut>
@@ -192,7 +192,7 @@ MultiTableFuturePtr Perform(ExecutorPtr executor,
 MultiTableFuturePtr Split(ExecutorPtr executor,
                           TableFuturePtr source_path,
                           bool remove_source = false,
-                          size_t block_size = 1,
+                          size_t block_size = default_block_size,
                           bool by_key = false);
 
 TableFuturePtr Map(ExecutorPtr executor,
