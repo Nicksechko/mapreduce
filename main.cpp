@@ -14,7 +14,7 @@ int main(int argc, char** argv) {
         second_script_command = argv[5];
     }
 
-    auto executor = MakeThreadPoolExecutor(4);
+    auto executor = MakeThreadPoolExecutor(1);
 
     TableFuturePtr result;
 
