@@ -4,7 +4,6 @@ import pandas as pd
 from typing import Set, List
 from threading import Thread
 from queue import Queue
-from requests import get
 from wiki import WikipediaParser
 from argparse import ArgumentParser
 from nltk.corpus import brown

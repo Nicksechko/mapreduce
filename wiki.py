@@ -11,7 +11,7 @@ def normalize(text: str):
 
 class WikipediaParser:
     @classmethod
-    def get_content(cls, url: str) -> Dict[str, Any]:
+    def get_content(cls, url: str) -> str:
         html = get(url)
         if html.status_code != 200:
             print(f"Get {html.status_code} on {url}", file=stderr)
@@ -27,7 +27,7 @@ class WikipediaParser:
         if content is not None:
             content = content.text
 
-        return {'title': normalize(title), 'content': normalize(content)}
+        return ' '.join([normalize(title), normalize(content)])
 
 
     @classmethod
