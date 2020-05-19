@@ -12,7 +12,7 @@ namespace bp = boost::process;
 namespace {
 std::atomic<size_t> tasks_count{0};
 
-const size_t default_block_size = 100;
+const size_t default_block_size = 100'000;
 }
 
 template<class TIn, class TOut>

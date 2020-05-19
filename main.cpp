@@ -2,33 +2,35 @@
 #include "mapreduce.h"
 
 int main(int argc, char** argv) {
-    std::string mode(argv[1]);
-    std::string source_path(argv[2]);
-    std::string result_path(argv[3]);
-    std::string first_script_command;
-    if (argc > 4) {
-        first_script_command = argv[4];
-    }
-    std::string second_script_command;
-    if (argc > 5) {
-        second_script_command = argv[5];
+    std::vector<std::string> pos_args;
+    int block_size = 100'000;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "-b") {
+            block_size = std::stoi(argv[++i]);
+        } else {
+            pos_args.emplace_back(argv[i]);
+        }
     }
 
     auto executor = MakeThreadPoolExecutor(4);
 
     TableFuturePtr result;
 
-    if (mode == "map") {
-        result = Map(executor, DummyFuture(source_path), first_script_command);
-    } else if (mode == "sort") {
-        result = Sort(executor, DummyFuture(source_path));
-    } else if (mode == "reduce") {
-        result = Reduce(executor, DummyFuture(source_path), first_script_command);
-    } else if (mode == "mapreduce") {
-        result = MapReduce(executor, DummyFuture(source_path), first_script_command, second_script_command);
+    if (pos_args[0] == "map") {
+        result = Map(executor, DummyFuture(pos_args[1]),
+                     pos_args[3], false, block_size);
+    } else if (pos_args[0] == "sort") {
+        result = Sort(executor, DummyFuture(pos_args[1]),
+                      false, block_size);
+    } else if (pos_args[0] == "reduce") {
+        result = Reduce(executor, DummyFuture(pos_args[1]),
+                        pos_args[3], false, block_size);
+    } else if (pos_args[0] == "mapreduce") {
+        result = MapReduce(executor, DummyFuture(pos_args[1]),
+                           pos_args[3], pos_args[4], false, block_size);
     }
 
-    bp::system("mv " + result->get() + " " + result_path);
+    bp::system("mv " + result->get() + " " + pos_args[2]);
 
     return 0;
 }
