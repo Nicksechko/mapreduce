@@ -37,6 +37,8 @@ if __name__ == "__main__":
 
     while not contents.empty():
         url, content = contents.get()
+        if content is None:
+            continue
         for word in content.split():
             if word in dictionary:
                 dictionary[word].add(url)

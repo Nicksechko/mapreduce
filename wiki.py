@@ -11,7 +11,7 @@ def normalize(text: str):
 
 class WikipediaParser:
     @classmethod
-    def get_content(cls, url: str) -> str:
+    def get_content(cls, url: str):
         html = get(url)
         if html.status_code != 200:
             print(f"Get {html.status_code} on {url}", file=stderr)
@@ -31,7 +31,7 @@ class WikipediaParser:
 
 
     @classmethod
-    def get_links(cls, url: str) -> List[str]:
+    def get_links(cls, url: str):
         html = get(url)
 
         if html.status_code != 200:
